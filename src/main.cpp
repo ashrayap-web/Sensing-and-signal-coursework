@@ -11,9 +11,19 @@
 //   Pin 3 A-, Pin 6 B- -> leave unconnected (or feed an RS422 receiver)
 //
 // TIM3 runs in hardware quadrature (x4) mode, so 1000 CPR = 4000 counts/rev.
+//
+// Also reads an Adafruit MCP9808 temperature sensor over I2C1:
+//   VIN -> 3V3
+//   GND -> GND
+//   SCL -> PB8 (Arduino D15)
+//   SDA -> PB9 (Arduino D14)
+//   A0/A1/A2 unconnected -> I2C address 0x18
+//
 // Serial monitor commands: 'z' = zero position.
 
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_MCP9808.h>
 
 static constexpr int32_t CPR = 1000;
 static constexpr int32_t COUNTS_PER_REV = CPR * 4;
@@ -21,6 +31,9 @@ static constexpr uint32_t PRINT_INTERVAL_MS = 100;
 
 static int32_t position = 0;     // extended 32-bit count (TIM3 is only 16-bit)
 static uint16_t lastCnt = 0;
+
+static Adafruit_MCP9808 tempSensor;
+static bool tempOk = false;
 
 static void encoderInit() {
   RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
@@ -51,6 +64,16 @@ static void encoderUpdate() {
 void setup() {
   Serial.begin(115200);
   encoderInit();
+
+  Wire.begin();  // I2C1: SDA = PB9 (D14), SCL = PB8 (D15)
+  tempOk = tempSensor.begin(0x18);
+  if (tempOk) {
+    tempSensor.setResolution(3);  // 0.0625 degC, ~250 ms per conversion
+    tempSensor.wake();
+  } else {
+    Serial.println("MCP9808 not found at 0x18 - check wiring");
+  }
+
   Serial.println("AS22-M530-5B12 encoder test (1000 CPR, x4 = 4000 counts/rev)");
   Serial.println("Send 'z' to zero.");
 }
@@ -86,6 +109,11 @@ void loop() {
   int a = (idr >> 6) & 1;
   int b = (idr >> 7) & 1;
 
-  Serial.printf("count=%ld  revs=%.3f  angle=%.2f deg  rpm=%.1f  A=%d B=%d\r\n",
+  Serial.printf("count=%ld  revs=%.3f  angle=%.2f deg  rpm=%.1f  A=%d B=%d",
                 (long)position, revs, angleDeg, rpm, a, b);
+  if (tempOk) {
+    Serial.printf("  temp=%.4f C\r\n", tempSensor.readTempC());
+  } else {
+    Serial.print("  temp=--\r\n");
+  }
 }
